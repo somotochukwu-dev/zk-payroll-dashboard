@@ -79,6 +79,8 @@ import {
 } from "@/src/payroll/instructionVersion";
 import PayrollSubmissionSequenceWarning from "./PayrollSubmissionSequenceWarning";
 import { validatePayrollOperatorPermission } from "@/lib/payroll/permissions";
+import { usePayrollUploadCheckpointStore } from "@/stores/payrollUploadCheckpoint";
+import { UploadRecoveryBanner } from "@/components/features/payroll/UploadRecoveryBanner";
 
 const STEPS: { key: PayrollWizardStep; label: string }[] = [
   { key: "review", label: "Review" },
@@ -171,6 +173,12 @@ function PayrollWizard() {
   const addApprovalEvent = useApprovalHistory((s) => s.addEvent);
   const clearApprovalHistory = useApprovalHistory((s) => s.clearHistory);
 
+  // Upload recovery checkpoints
+  const saveCheckpoint = usePayrollUploadCheckpointStore((s) => s.saveCheckpoint);
+  const markCheckpointCompleted = usePayrollUploadCheckpointStore((s) => s.markCompleted);
+  const clearCheckpoint = usePayrollUploadCheckpointStore((s) => s.clearCheckpoint);
+  const evictStaleCheckpoint = usePayrollUploadCheckpointStore((s) => s.evictStaleCheckpoint);
+
   // #534 — the saved policy governs the run; the wizard reads the saved
   // policy (not unsaved edits), mirroring the payout limit indicator.
   const savedPolicyVersion = usePayrollPolicyStore((st) => st.savedPolicy.version);
@@ -186,11 +194,18 @@ function PayrollWizard() {
     }
   }, [employeeIds.length, hasDraft, submissionStatus]);
 
+<<<<<<< Updated upstream
   useEffect(() => {
     if (!draftResolvedRef.current && wasInterrupted()) {
       setShowInterruptedBanner(true);
     }
   }, [wasInterrupted]);
+=======
+  // Evict checkpoints older than 24 h so stale recovery banners never linger.
+  useEffect(() => {
+    evictStaleCheckpoint();
+  }, [evictStaleCheckpoint]);
+>>>>>>> Stashed changes
 
   const { sessionState } = useSession();
   const network = useWalletStore((s) => s.network);
@@ -226,6 +241,9 @@ function PayrollWizard() {
     draftResolvedRef.current = true;
     initialEventRecordedRef.current = true;
 
+    // Checkpoint: employee selection complete — step 1 of upload.
+    saveCheckpoint(runId, "draft_started", selected.length, false);
+
     addApprovalEvent(
       "draft_created",
       walletPublicKey,
@@ -251,6 +269,7 @@ function PayrollWizard() {
     addApprovalEvent,
     walletPublicKey,
     logEvent,
+    saveCheckpoint,
   ]);
 
   const handleGenerateProof = useCallback(async () => {
@@ -284,6 +303,8 @@ function PayrollWizard() {
           actorRole: "admin",
           details: `ZK proof generated successfully for ${selectedEmployees.length} employees totaling $${totalAmount.toLocaleString()}`,
         });
+        // Checkpoint: proof ready — safe to resume from Confirmation.
+        saveCheckpoint(payrollRunId, "proof_generated", selectedEmployees.length, true);
       }
       addApprovalEvent(
         "proof_generation_completed",
@@ -327,6 +348,7 @@ function PayrollWizard() {
     logEvent,
     selectedEmployees.length,
     totalAmount,
+    saveCheckpoint,
   ]);
 
   const handleSubmit = useCallback(async () => {
@@ -375,11 +397,18 @@ function PayrollWizard() {
         actorRole: "admin",
         details: `Wallet signing initiated for payroll run: ${selectedEmployees.length} employees, $${totalAmount.toLocaleString()} total`,
       });
+      // Checkpoint: operator confirmed and dispatch is about to start.
+      saveCheckpoint(payrollRunId, "confirmed", selectedEmployees.length, true);
     }
 
     setSubmissionStatus("submitting");
     setSubmissionError(null);
     nextStep();
+
+    // Checkpoint: transaction dispatch in flight — recoverable if the tab closes now.
+    if (payrollRunId) {
+      saveCheckpoint(payrollRunId, "submitting", selectedEmployees.length, true);
+    }
 
     addApprovalEvent(
       "payroll_confirmed",
@@ -408,6 +437,9 @@ function PayrollWizard() {
           actorRole: "admin",
           details: `Payroll submitted successfully. Transaction hash: ${txHash}`,
         });
+        // Checkpoint: run finished — clear the recovery entry so the banner
+        // does not reappear on the next page load.
+        markCheckpointCompleted(payrollRunId);
       }
       addApprovalEvent(
         "submission_completed",
@@ -464,6 +496,8 @@ function PayrollWizard() {
     payrollRunId,
     logEvent,
     selectedEmployees.length,
+    saveCheckpoint,
+    markCheckpointCompleted,
   ]);
 
   const handleReviewNext = useCallback(async () => {
@@ -523,7 +557,10 @@ function PayrollWizard() {
     reviewedDraftChecksum.current = null;
     setDraftChecksumWarning(null);
     clearApprovalHistory();
-  }, [payrollRunId, logEvent, reset, submissionStatus, clearApprovalHistory]);
+    // Clear any stored upload checkpoint so the recovery banner does not
+    // reappear after the operator has deliberately started over.
+    clearCheckpoint();
+  }, [payrollRunId, logEvent, reset, submissionStatus, clearApprovalHistory, clearCheckpoint]);
 
   const idx = stepIndex(currentStep);
 
@@ -564,6 +601,7 @@ function PayrollWizard() {
       {/* Wallet Reconnect Recovery Banner */}
       <WalletReconnectRecoveryBanner />
 
+<<<<<<< Updated upstream
       {/* Interrupted Settlement Recovery Banner (#755) */}
       {showInterruptedBanner && (
         <div
@@ -639,6 +677,26 @@ function PayrollWizard() {
       )}
 
       {!showInterruptedBanner && showDraftBanner && (
+=======
+      {/* Upload Recovery Banner — shown when a previous upload was interrupted */}
+      <UploadRecoveryBanner
+        runId={payrollRunId ?? undefined}
+        onResume={() => {
+          restoreDraft();
+          setShowDraftBanner(false);
+          draftResolvedRef.current = true;
+        }}
+        onDiscard={() => {
+          clearDraft();
+          clearCheckpoint();
+          clearApprovalHistory();
+          setShowDraftBanner(false);
+          draftResolvedRef.current = true;
+        }}
+      />
+
+      {showDraftBanner && (
+>>>>>>> Stashed changes
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
           <Save className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
           <div className="flex-1">

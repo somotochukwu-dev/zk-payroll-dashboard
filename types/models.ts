@@ -1199,3 +1199,68 @@ export const DEFAULT_PAYROLL_IMPORT_ROLLBACK_POLICY: PayrollImportRollbackPolicy
   allowRollbackAfterExecution: false,
   allowRollbackAfterReconciliation: false,
 };
+
+// ─── Payroll Upload Recovery Checkpoints ─────────────────────────────────────
+
+/**
+ * The stage of a payroll upload at which a checkpoint was recorded.
+ *
+ * Mirrors the four wizard steps plus a terminal state so the recovery
+ * banner can direct the operator to the exact point of interruption.
+ *
+ * - `draft_started`   – employee selection and amount review are complete.
+ * - `proof_generated` – ZK proof was produced and validated.
+ * - `confirmed`       – operator reviewed and confirmed the proof step.
+ * - `submitting`      – transaction dispatch was in flight when interrupted.
+ * - `completed`       – upload finished successfully; no recovery needed.
+ */
+export type UploadCheckpointStage =
+  | "draft_started"
+  | "proof_generated"
+  | "confirmed"
+  | "submitting"
+  | "completed";
+
+/**
+ * A privacy-safe snapshot of payroll upload progress written at each
+ * meaningful wizard transition.
+ *
+ * Sensitive fields — employee amounts, salaries, ZK proofs, wallet keys —
+ * are intentionally excluded. Only structural metadata safe to store
+ * client-side or transmit to a logging endpoint is recorded.
+ */
+export interface UploadCheckpoint {
+  /** Opaque run identifier generated when the wizard session starts. */
+  runId: string;
+  /** Upload stage this checkpoint represents. */
+  stage: UploadCheckpointStage;
+  /**
+   * Number of employees in the batch — count only, never IDs or amounts.
+   * A zero value means no employees were locked in at checkpoint time.
+   */
+  employeeCount: number;
+  /** Whether a valid ZK proof existed when this checkpoint was written. */
+  proofReady: boolean;
+  /** ISO-8601 timestamp when the checkpoint was recorded. */
+  savedAt: string;
+  /**
+   * Human-readable hint surfaced in the recovery banner.
+   * Must not contain salary figures, wallet addresses, or employee names.
+   */
+  recoveryHint: string;
+}
+
+/**
+ * Result returned by the checkpoint API on a GET request.
+ * Wraps the latest checkpoint plus staleness metadata.
+ */
+export interface UploadCheckpointQueryResult {
+  checkpoint: UploadCheckpoint | null;
+  /** True when a recoverable (non-completed) checkpoint exists. */
+  isRecoverable: boolean;
+  /**
+   * Age in seconds since the checkpoint was saved.
+   * Null when no checkpoint exists.
+   */
+  ageSeconds: number | null;
+}
